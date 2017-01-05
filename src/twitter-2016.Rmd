@@ -1,0 +1,134 @@
+---
+title: "TwitterAnalytics"
+author: "Vijayvithal"
+date: "January 1, 2017"
+output: 
+  html_document: 
+    keep_md: yes
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+library(dplyr)
+library(tidyr)
+library(lubridate)
+library(ggplot2)
+library(rtweet)
+library(text2vec)
+library(igraph)
+library(knitr)
+knitr::opts_knit$set(root.dir = normalizePath('../'))
+knitr::opts_chunk$set(fig.width=4, fig.height=3, echo=FALSE, warning=FALSE, message=FALSE)
+options(digits=4,scipen = 9)
+lakh<-100000
+crore<-100*lakh
+lakhcrore<-lakh*crore
+```
+
+## What did the politicians say in 2016?
+
+What views were expressed by them?
+What views were endorsed by them?
+What views were expressed by their friends?
+Who are the "influencers"?
+
+Politicians analysed are the PM, the President, the Union cabinet, and leaders of major political parties (Congress,CPI-M,AAP)
+
+## Analysis method.
+
+* We get the last 3000 tweets by each of the politicians.
+* Select those tweets made in 2016.
+* Eliminate all verbs and words less than 4 characters 
+* Seperate out tweets from retweets,
+```{r getData,cache=T}
+# TBD
+#	* Check people mentioned.
+#	* Download their friend list.
+#	* Check the last 100 tweets made by their first 100 friends.
+
+
+#Check if data is already downloaded
+#Add later "yadavakhilesh","GopinathMunde1","Kiren_Rijiju", "harsimrat_badal","RashtrapatiBhvn",
+politicians<-unique(c( "RailMinIndia", "MoHFW_INDIA", "TexMinIndia", "HRDMinistry", "HMOIndia", "CimGOI", "manojsinhabjp", "kpgurjarbjp", "Rao_InderjitS", "DVSBJP", "shripadynaik", "rsprasad", "RadhamohanBJP", "arunjaitley", "dpradhanbjp", "Gen_VKSingh",  "MVenkaiahNaidu", "umasribharti", "rajnathsingh", "PiyushGoyal", "UK4Bihar", "PrakashJavdekar", "tourismgoi", "jualoram",  "PMOIndia", "KalrajMishra", "AnanthKumar_BJP", "PIB_India", "SushmaSwaraj", "DrJitendraSingh", "sureshpprabhu", "smritiirani", "santoshgangwar", "nitin_gadkari", "drharshvardhan",  "Ra_THORe", "nsitharaman", "narendramodi", "irvpaswan","narendramodi","OfficeOfRG","ArvindKejriwal"))
+#politicians<-c("narendramodi")
+for(pol in politicians){
+  print (pol)
+  destfile<-paste0("../data/",pol,".tweet")
+  destfilesuffix<-paste0("data/",pol,".tweet.tweets.csv")
+  if(!file.exists(destfilesuffix)){
+    timeline<- get_timeline(pol, n = 4000, max_id = NULL, parse = TRUE,
+                            clean_tweets = TRUE,lang="en")
+    save_as_csv(timeline,destfile)
+  }
+  
+}
+#Perform any required cleanup.
+```
+
+Who is most active on twitter? What is original vs retweet ratio?
+How does a leader use his twitter account? for self? for common cause? for Office?
+Who gets a retweet?
+Who gets a reply?
+who gets a mention in original tweet?
+
+
+
+
+
+
+```{r childknits}
+src <- lapply(politicians, function(pol){knit_expand(file = "src/pol-Tweets.Rmdx")})
+```
+`r knit(text = unlist(src))`
+
+# Influence matrix.
+
+Influence can be measured by seeing who gets retweeted, who gets a reply and who gets mentioned in orignal tweets.
+```
+  clean_influencers<-influencers%>%
+  select(screen_name, mentions_screen_name, text, in_reply_to_screen_name)  %>%
+  rowwise()%>%
+  mutate(retweetid=ifelse(grep("^RT \\S*:.*",text,perl=T),gsub("^RT (\\S*):.*","\\1",text,perl=F),NA)) %>%
+  separate(mentions_screen_name, c("s1","s2","s3","s4","s5","s6","s7","s8","s9","s10", sep=","))%>%
+  gather(scol,mentions,s1,s2,s3,s4,s5,s6,s7,s8,s9,s10)
+
+edges<-clean_influencers%>%
+  select(screen_name,mentions)%>%
+  rename(from=screen_name,to=mentions)%>%
+  filter(from!=to)%>%
+  filter(nchar(to)>2)
+pruned<-edges%>%
+  group_by(from,to)%>%
+  summarise(weight=n())%>%
+  arrange(desc(weight))
+top<-pruned%>%
+  ungroup%>%
+  group_by(from)%>%
+  top_n(20,weight)%>%
+  ungroup()
+top$from<-as.character(top$from)
+g<-graph_from_data_frame(top)#%>%filter(from=="narendramodi"))
+#E(g)$weight<-1
+
+g.sim<-simplify(g)
+E(g.sim)$curved<-.4
+E(g.sim)$label<-E(g.sim)$weight
+E(g.sim)$arrow.width <- 0.1*E(g.sim)$weight 
+l <- layout_in_circle(g.sim)
+plot(g.sim)#,edge.width=0.2*E(g.sim)$weight,vertex.size=44,layout=l)
+layouts <- grep("^layout_", ls("package:igraph"), value=TRUE)[-1] 
+layouts <- layouts[!grepl("bipartite|merge|norm|sugiyama|tree", layouts)]
+
+for (layout in layouts) {
+
+  print(layout)
+
+  l <- do.call(layout, list(g.sim)) 
+
+  plot(g.sim, layout=l, main=layout,rescale=T, asp = 0, vertex.size = 5, vertex.label.cex = 0.8) 
+  }
+#maxwidth<-max(edges$penwidth)
+#edges<-edges[complete.cases(edges),]
+#%>%mutate(penwidth=1+5*penwidth/maxwidth)
+#plot(g.sim,edge.width=0.2*E(g.sim)$weight,vertex.size=44,layout=l)
+```
